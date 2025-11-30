@@ -415,7 +415,9 @@ export function yXmlFragmentToProsemirrorJSON (xmlFragment) {
         type: item.nodeName
       }
 
-      const attrs = item.getAttributes()
+      const attrs = el.getAttributes(
+        isVisible(el._item, snapshot) ? snapshot : prevSnapshot
+      )
       if (Object.keys(attrs).length) {
         response.attrs = attrs
       }
