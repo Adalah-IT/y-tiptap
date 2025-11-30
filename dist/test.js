@@ -27701,12 +27701,12 @@
               .forEach(createChildren);
       }
       try {
-
-          const isRemovedNode = snapshot !== undefined && !isVisible(el._item, snapshot);
-          const attrs = el.getAttributes(isRemovedNode ? prevSnapshot : snapshot);
-
+          // For removed items, get attributes from prevSnapshot where they existed
+          // For added or unchanged items, get attributes from snapshot (current state)
+          const isRemoved = snapshot !== undefined && !isVisible(/** @type {Y.Item} */ (el._item), snapshot);
+          const attrs = el.getAttributes(isRemoved ? prevSnapshot : snapshot);
           if (snapshot !== undefined) {
-              if (!isVisible(/** @type {Y.Item} */ (el._item), snapshot)) {
+              if (isRemoved) {
                   attrs.ychange = computeYChange ? computeYChange('removed', /** @type {Y.Item} */ (el._item).id) : {type: 'removed'};
               } else if (!isVisible(/** @type {Y.Item} */ (el._item), prevSnapshot)) {
                   attrs.ychange = computeYChange ? computeYChange('added', /** @type {Y.Item} */ (el._item).id) : {type: 'added'};

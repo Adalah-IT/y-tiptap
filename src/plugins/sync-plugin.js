@@ -624,9 +624,12 @@ export const createNodeFromYElement = (el, schema, meta, snapshot, prevSnapshot,
             .forEach(createChildren)
     }
     try {
-        const attrs = el.getAttributes(snapshot)
+        // For removed items, get attributes from prevSnapshot where they existed
+        // For added or unchanged items, get attributes from snapshot (current state)
+        const isRemoved = snapshot !== undefined && !isVisible(/** @type {Y.Item} */ (el._item), snapshot)
+        const attrs = el.getAttributes(isRemoved ? prevSnapshot : snapshot)
         if (snapshot !== undefined) {
-            if (!isVisible(/** @type {Y.Item} */ (el._item), snapshot)) {
+            if (isRemoved) {
                 attrs.ychange = computeYChange ? computeYChange('removed', /** @type {Y.Item} */ (el._item).id) : {type: 'removed'}
             } else if (!isVisible(/** @type {Y.Item} */ (el._item), prevSnapshot)) {
                 attrs.ychange = computeYChange ? computeYChange('added', /** @type {Y.Item} */ (el._item).id) : {type: 'added'}
