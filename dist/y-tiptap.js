@@ -626,6 +626,8 @@ const createNodeIfNotExists = (el, schema, meta, snapshot, prevSnapshot, compute
  */
 const createNodeFromYElement = (el, schema, meta, snapshot, prevSnapshot, computeYChange) => {
     const children = [];
+    // Check if this element was removed (exists in prevSnapshot but deleted in snapshot)
+    const isRemoved = snapshot !== undefined && prevSnapshot !== undefined && !isVisible(/** @type {Y.Item} */ (el._item), snapshot);
     /**
      * @param {Y.XmlElement | Y.XmlText} type
      */
@@ -660,13 +662,17 @@ const createNodeFromYElement = (el, schema, meta, snapshot, prevSnapshot, comput
     if (snapshot === undefined || prevSnapshot === undefined) {
         el.toArray().forEach(createChildren);
     } else {
-        Y.typeListToArraySnapshot(el, new Y.Snapshot(prevSnapshot.ds, snapshot.sv))
+        // For removed elements, get children as they were in prevSnapshot
+        // For other elements, use the combined snapshot to show both old and new content
+        const childSnapshot = isRemoved
+            ? prevSnapshot
+            : new Y.Snapshot(prevSnapshot.ds, snapshot.sv);
+        Y.typeListToArraySnapshot(el, childSnapshot)
             .forEach(createChildren);
     }
     try {
         // For removed items, get attributes from prevSnapshot where they existed
         // For added or unchanged items, get attributes from snapshot (current state)
-        const isRemoved = snapshot !== undefined && !isVisible(/** @type {Y.Item} */ (el._item), snapshot);
         const attrs = el.getAttributes(isRemoved ? prevSnapshot : snapshot);
         if (snapshot !== undefined) {
             if (isRemoved) {
@@ -700,11 +706,22 @@ const createNodeFromYElement = (el, schema, meta, snapshot, prevSnapshot, comput
  */
 const createTextNodesFromYText = (text, schema, _meta, snapshot, prevSnapshot, computeYChange) => {
     const nodes = [];
-    const deltas = text.toDelta(snapshot, prevSnapshot, computeYChange);
+    // For removed text nodes, get content from prevSnapshot where they existed
+    // For other text nodes, use normal snapshot order to show changes
+    const isTextRemoved = snapshot !== undefined && prevSnapshot !== undefined &&
+        !isVisible(/** @type {Y.Item} */ (text._item), snapshot);
+    const deltas = isTextRemoved
+        ? text.toDelta(prevSnapshot, undefined, computeYChange)
+        : text.toDelta(snapshot, prevSnapshot, computeYChange);
     try {
         for (let i = 0; i < deltas.length; i++) {
             const delta = deltas[i];
-            nodes.push(schema.text(delta.insert, attributesToMarks(delta.attributes, schema)));
+            const attrs = delta.attributes || {};
+            // For removed text nodes, add the ychange marker
+            if (isTextRemoved && computeYChange) {
+                attrs.ychange = computeYChange('removed', /** @type {Y.Item} */ (text._item).id);
+            }
+            nodes.push(schema.text(delta.insert, attributesToMarks(attrs, schema)));
         }
     } catch (e) {
         // an error occured while creating the node. This is probably a result of a concurrent action.
