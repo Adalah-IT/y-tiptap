@@ -724,16 +724,18 @@ const createNodeFromYElement = (el, schema, meta, snapshot, prevSnapshot, comput
         if (snapshot !== undefined && prevSnapshot !== undefined && !isRemoved && !isAdded && existedInPrev) {
             const prevAttrs = el.getAttributes(prevSnapshot);
             const currAttrs = el.getAttributes(snapshot);
-            
+
             // Compare attributes (excluding ychange)
             if (!equalAttrs(prevAttrs, currAttrs)) {
                 // Attributes changed - create TWO nodes: one removed (old attrs), one added (new attrs)
-                const removedYchange = computeYChange ? computeYChange('removed', /** @type {Y.Item} */ (el._item).id) : {type: 'removed'};
+                // For attribute changes, use 'added' to get the user (since the item wasn't deleted, getUserByDeletedId returns null)
+                // Both versions should show the same user who made the modification
                 const addedYchange = computeYChange ? computeYChange('added', /** @type {Y.Item} */ (el._item).id) : {type: 'added'};
-                
+                const removedYchange = computeYChange ? {...addedYchange, type: 'removed'} : {type: 'removed'};
+
                 const removedNode = schema.node(el.nodeName, {...prevAttrs, ychange: removedYchange}, children);
                 const addedNode = schema.node(el.nodeName, {...currAttrs, ychange: addedYchange}, children);
-                
+
                 // Don't set mapping for either since we're creating duplicates
                 return [removedNode, addedNode]
             }
@@ -858,20 +860,23 @@ const createTextNodesFromYText = (text, schema, _meta, snapshot, prevSnapshot, c
                 }
                 
                 if (hasFormattingChanges) {
+                    // For formatting changes, use 'added' to get the user (since the item wasn't deleted, getUserByDeletedId returns null)
+                    // Both versions should show the same user who made the modification
+                    const addedYchange = computeYChange ? computeYChange('added', /** @type {Y.Item} */ (text._item).id) : {type: 'added'};
+                    const removedYchange = computeYChange ? {...addedYchange, type: 'removed'} : {type: 'removed'};
+
                     // Create nodes for removed formatting (old state)
-                    const removedYchange = computeYChange ? computeYChange('removed', /** @type {Y.Item} */ (text._item).id) : {type: 'removed'};
                     for (const delta of prevDeltas) {
                         const attrs = {...(delta.attributes || {}), ychange: removedYchange};
                         nodes.push(schema.text(delta.insert, attributesToMarks(attrs, schema)));
                     }
-                    
+
                     // Create nodes for added formatting (new state)
-                    const addedYchange = computeYChange ? computeYChange('added', /** @type {Y.Item} */ (text._item).id) : {type: 'added'};
                     for (const delta of currDeltas) {
                         const attrs = {...(delta.attributes || {}), ychange: addedYchange};
                         nodes.push(schema.text(delta.insert, attributesToMarks(attrs, schema)));
                     }
-                    
+
                     return nodes
                 }
             }
