@@ -249,6 +249,58 @@ export const testVersioningWithGarbageCollection = async (_tc) => {
   t.compare(viewstate1, expectedState)
 }
 
+export const testVersioningNodeAttributeChange = async (_tc) => {
+  const ydoc = new Y.Doc({ gc: false })
+  const yxml = ydoc.get('prosemirror', Y.XmlFragment)
+  const permanentUserData = new Y.PermanentUserData(ydoc)
+  permanentUserData.setUserMapping(ydoc, ydoc.clientID, 'me')
+  const view = createNewComplexProsemirrorView(ydoc)
+  const customEl = new Y.XmlElement('custom')
+  customEl.setAttribute('checked', false)
+  yxml.insert(0, [customEl])
+  const snapshot1 = Y.snapshot(ydoc)
+  customEl.setAttribute('checked', true)
+  const snapshot2 = Y.snapshot(ydoc)
+  view.dispatch(
+    view.state.tr.setMeta(ySyncPluginKey, { snapshot: snapshot2, prevSnapshot: snapshot1, permanentUserData })
+  )
+  await promise.wait(50)
+  const customNodes = JSON.parse(JSON.stringify(view.state.doc.toJSON().content))
+    .filter((n) => n.type === 'custom')
+  t.assert(customNodes.length === 2, 'an attribute change renders a removed + added pair')
+  const removed = customNodes.find((n) => n.attrs.ychange?.type === 'removed')
+  const added = customNodes.find((n) => n.attrs.ychange?.type === 'added')
+  t.assert(removed?.attrs.checked === false, 'the removed node keeps the old attributes')
+  t.assert(added?.attrs.checked === true, 'the added node has the new attributes')
+  t.assert(added?.attrs.ychange.user === 'me', 'the change is attributed to its author')
+}
+
+export const testVersioningTextFormattingChange = async (_tc) => {
+  const ydoc = new Y.Doc({ gc: false })
+  const yxml = ydoc.get('prosemirror', Y.XmlFragment)
+  const permanentUserData = new Y.PermanentUserData(ydoc)
+  permanentUserData.setUserMapping(ydoc, ydoc.clientID, 'me')
+  const view = createNewComplexProsemirrorView(ydoc)
+  const p = new Y.XmlElement('paragraph')
+  const ytext = new Y.XmlText('bb')
+  p.insert(0, [ytext])
+  yxml.insert(0, [p])
+  const snapshot1 = Y.snapshot(ydoc)
+  ytext.format(0, 2, { strong: {} })
+  const snapshot2 = Y.snapshot(ydoc)
+  view.dispatch(
+    view.state.tr.setMeta(ySyncPluginKey, { snapshot: snapshot2, prevSnapshot: snapshot1, permanentUserData })
+  )
+  await promise.wait(50)
+  const content = JSON.parse(JSON.stringify(view.state.doc.toJSON().content[0].content))
+  const withChange = (type) => content.find((n) => n.marks?.some((m) => m.type === 'ychange' && m.attrs.type === type))
+  const removed = withChange('removed')
+  const added = withChange('added')
+  t.assert(removed !== undefined && added !== undefined, 'a formatting change renders a removed + added pair')
+  t.assert(!removed.marks.some((m) => m.type === 'strong'), 'the removed text is not bold')
+  t.assert(added.marks.some((m) => m.type === 'strong'), 'the added text is bold')
+}
+
 export const testAddToHistoryIgnore = (_tc) => {
   const ydoc = new Y.Doc()
   const view = createNewProsemirrorViewWithUndoManager(ydoc)

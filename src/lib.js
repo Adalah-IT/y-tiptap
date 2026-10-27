@@ -590,13 +590,13 @@ export const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resol
  * @param {Schema} schema
  */
 export const yXmlFragmentToProseMirrorFragment = (yXmlFragment, schema) => {
-  const fragmentContent = yXmlFragment.toArray().map((t) =>
+  const fragmentContent = yXmlFragment.toArray().flatMap((t) =>
     createNodeFromYElement(
       /** @type {Y.XmlElement} */ (t),
       schema,
       createEmptyMeta()
-    )
-  ).filter((n) => n !== null)
+    ) ?? []
+  )
   return Fragment.fromArray(fragmentContent)
 }
 
@@ -620,13 +620,13 @@ export const yXmlFragmentToProseMirrorRootNode = (yXmlFragment, schema) =>
  */
 export const initProseMirrorDoc = (yXmlFragment, schema) => {
   const meta = createEmptyMeta()
-  const fragmentContent = yXmlFragment.toArray().map((t) =>
+  const fragmentContent = yXmlFragment.toArray().flatMap((t) =>
     createNodeFromYElement(
       /** @type {Y.XmlElement} */ (t),
       schema,
       meta
-    )
-  ).filter((n) => n !== null)
+    ) ?? []
+  )
   const doc = schema.topNodeType.create(null, Fragment.fromArray(fragmentContent))
   return { doc, meta, mapping: meta.mapping }
 }

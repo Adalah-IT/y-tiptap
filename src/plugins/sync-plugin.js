@@ -535,13 +535,13 @@ export class ProsemirrorBinding {
   unrenderSnapshot () {
     this.mapping.clear()
     this.mux(() => {
-      const fragmentContent = this.type.toArray().map((t) =>
+      const fragmentContent = this.type.toArray().flatMap((t) =>
         createNodeFromYElement(
           /** @type {Y.XmlElement} */ (t),
           this.prosemirrorView.state.schema,
           this
-        )
-      ).filter((n) => n !== null)
+        ) ?? []
+      )
       // @ts-ignore
       const tr = this._tr.replace(
         0,
@@ -560,13 +560,13 @@ export class ProsemirrorBinding {
       // transaction. Then the "before selection" doesn't exist. In this case, we need to create a
       // relative position before replacing content. Fixes #126
       const sel = this.beforeTransactionSelection !== null ? null : this.prosemirrorView.state.selection
-      const fragmentContent = this.type.toArray().map((t) =>
+      const fragmentContent = this.type.toArray().flatMap((t) =>
         createNodeFromYElement(
           /** @type {Y.XmlElement} */ (t),
           this.prosemirrorView.state.schema,
           this
-        )
-      ).filter((n) => n !== null)
+        ) ?? []
+      )
       // @ts-ignore
       const tr = this._tr.replace(
         0,
@@ -676,12 +676,12 @@ export class ProsemirrorBinding {
         const fragmentContent = Y.typeListToArraySnapshot(
           historyType,
           new Y.Snapshot(prevSnapshot.ds, snapshot.sv)
-        ).map((t) => {
+        ).flatMap((t) => {
           if (
             !t._item.deleted || isVisible(t._item, snapshot) ||
             isVisible(t._item, prevSnapshot)
           ) {
-            return createNodeFromYElement(
+            const result = createNodeFromYElement(
               t,
               this.prosemirrorView.state.schema,
               { mapping: new Map(), isOMark: new Map() },
@@ -689,12 +689,14 @@ export class ProsemirrorBinding {
               prevSnapshot,
               computeYChange
             )
+            // An element whose attributes changed renders as a removed + added pair
+            return result === null ? [] : result
           } else {
             // No need to render elements that are not visible by either snapshot.
             // If a client adds and deletes content in the same snapshot the element is not visible by either snapshot.
-            return null
+            return []
           }
-        }).filter((n) => n !== null)
+        })
         // @ts-ignore
         const tr = this._tr.replace(
           0,
@@ -744,13 +746,13 @@ export class ProsemirrorBinding {
       // Rebuild the full Y↔PM mapping so relative cursor positions resolve against
       // current node sizes after structural changes (e.g. drag-and-drop block moves).
       this.mapping.clear()
-      const fragmentContent = this.type.toArray().map((t) =>
+      const fragmentContent = this.type.toArray().flatMap((t) =>
         createNodeIfNotExists(
           /** @type {Y.XmlElement | Y.XmlHook} */ (t),
           this.prosemirrorView.state.schema,
           this
-        )
-      ).filter((n) => n !== null)
+        ) ?? []
+      )
       const oldDoc = this.prosemirrorView.state.doc
       // @ts-ignore
       let tr = this._tr.replace(
@@ -811,7 +813,7 @@ export class ProsemirrorBinding {
  * @param {Y.Snapshot} [snapshot]
  * @param {Y.Snapshot} [prevSnapshot]
  * @param {function('removed' | 'added', Y.ID):any} [computeYChange]
- * @return {PModel.Node | null}
+ * @return {PModel.Node | Array<PModel.Node> | null}
  */
 const createNodeIfNotExists = (
   el,
@@ -847,7 +849,7 @@ const createNodeIfNotExists = (
  * @param {Y.Snapshot} [snapshot]
  * @param {Y.Snapshot} [prevSnapshot]
  * @param {function('removed' | 'added', Y.ID):any} [computeYChange]
- * @return {PModel.Node | null} Returns node if node could be created. Otherwise it deletes the yjs type and returns null
+ * @return {PModel.Node | Array<PModel.Node> | null} Returns node if node could be created, a removed + added pair when its attributes changed between snapshots. Otherwise it deletes the yjs type and returns null
  */
 export const createNodeFromYElement = (
   el,
@@ -858,6 +860,10 @@ export const createNodeFromYElement = (
   computeYChange
 ) => {
   const children = []
+  const diffing = snapshot !== undefined && prevSnapshot !== undefined
+  const isRemoved = diffing && !isVisible(/** @type {Y.Item} */ (el._item), snapshot)
+  const isAdded = diffing && !isVisible(/** @type {Y.Item} */ (el._item), prevSnapshot)
+  const existedInPrev = prevSnapshot !== undefined && isVisible(/** @type {Y.Item} */ (el._item), prevSnapshot)
   /**
    * @param {Y.XmlElement | Y.XmlText} type
    */
@@ -871,7 +877,9 @@ export const createNodeFromYElement = (
         prevSnapshot,
         computeYChange
       )
-      if (n !== null) {
+      if (Array.isArray(n)) {
+        children.push(...n)
+      } else if (n !== null) {
         children.push(n)
       }
     } else {
@@ -906,14 +914,41 @@ export const createNodeFromYElement = (
       }
     }
   }
-  if (snapshot === undefined || prevSnapshot === undefined) {
+  if (!diffing) {
     el.toArray().forEach(createChildren)
+  } else if (isRemoved) {
+    // A removed element shows the children it had in prevSnapshot, or its current
+    // children when it was added and removed between the two snapshots.
+    if (existedInPrev) {
+      Y.typeListToArraySnapshot(el, prevSnapshot).forEach(createChildren)
+    } else {
+      el.toArray().forEach(createChildren)
+    }
   } else {
     Y.typeListToArraySnapshot(el, new Y.Snapshot(prevSnapshot.ds, snapshot.sv))
       .forEach(createChildren)
   }
   try {
-    const attrs = el.getAttributes(snapshot)
+    let attrs
+    if (isRemoved) {
+      attrs = existedInPrev ? el.getAttributes(prevSnapshot) : el.getAttributes()
+    } else {
+      attrs = el.getAttributes(snapshot)
+    }
+    if (diffing && !isRemoved && !isAdded && existedInPrev) {
+      const prevAttrs = el.getAttributes(prevSnapshot)
+      if (!equalAttrs(prevAttrs, attrs)) {
+        // The item itself wasn't deleted, so the user who changed it is found via 'added'
+        const addedYchange = computeYChange
+          ? computeYChange('added', /** @type {Y.Item} */ (el._item).id)
+          : { type: 'added' }
+        const removedYchange = { ...addedYchange, type: 'removed' }
+        return [
+          schema.node(el.nodeName, { ...prevAttrs, ychange: removedYchange }, children),
+          schema.node(el.nodeName, { ...attrs, ychange: addedYchange }, children)
+        ]
+      }
+    }
     if (snapshot !== undefined) {
       if (!isVisible(/** @type {Y.Item} */ (el._item), snapshot)) {
         attrs.ychange = computeYChange
@@ -957,11 +992,46 @@ const createTextNodesFromYText = (
   computeYChange
 ) => {
   const nodes = []
-  const deltas = text.toDelta(snapshot, prevSnapshot, computeYChange)
+  const diffing = snapshot !== undefined && prevSnapshot !== undefined
+  const isRemoved = diffing && !isVisible(/** @type {Y.Item} */ (text._item), snapshot)
+  const isAdded = diffing && !isVisible(/** @type {Y.Item} */ (text._item), prevSnapshot)
+  const existedInPrev = prevSnapshot !== undefined && isVisible(/** @type {Y.Item} */ (text._item), prevSnapshot)
+  let deltas
+  if (isRemoved) {
+    deltas = existedInPrev ? text.toDelta(prevSnapshot, undefined, computeYChange) : text.toDelta()
+  } else {
+    deltas = text.toDelta(snapshot, prevSnapshot, computeYChange)
+  }
   try {
+    if (diffing && !isRemoved && !isAdded && existedInPrev) {
+      const prevDeltas = text.toDelta(prevSnapshot)
+      const currDeltas = text.toDelta(snapshot)
+      const prevChars = deltasToChars(prevDeltas)
+      const currChars = deltasToChars(currDeltas)
+      const sameText = prevChars.length > 0 &&
+        prevChars.map((c) => c.char).join('') === currChars.map((c) => c.char).join('')
+      if (sameText && prevChars.some((c, i) => !equalAttrs(c.attributes, currChars[i].attributes))) {
+        // Only the formatting changed: render the old run as removed and the new run as added
+        const addedYchange = computeYChange
+          ? computeYChange('added', /** @type {Y.Item} */ (text._item).id)
+          : { type: 'added' }
+        const removedYchange = { ...addedYchange, type: 'removed' }
+        prevDeltas.forEach((delta) => {
+          nodes.push(schema.text(delta.insert, attributesToMarks({ ...(delta.attributes || {}), ychange: removedYchange }, schema)))
+        })
+        currDeltas.forEach((delta) => {
+          nodes.push(schema.text(delta.insert, attributesToMarks({ ...(delta.attributes || {}), ychange: addedYchange }, schema)))
+        })
+        return nodes
+      }
+    }
     for (let i = 0; i < deltas.length; i++) {
       const delta = deltas[i]
-      nodes.push(schema.text(delta.insert, attributesToMarks(delta.attributes, schema)))
+      const attrs = delta.attributes || {}
+      if (isRemoved && computeYChange) {
+        attrs.ychange = computeYChange('removed', /** @type {Y.Item} */ (text._item).id)
+      }
+      nodes.push(schema.text(delta.insert, attributesToMarks(attrs, schema)))
     }
   } catch (e) {
     // an error occured while creating the node. This is probably a result of a concurrent action.
@@ -973,6 +1043,14 @@ const createTextNodesFromYText = (
   // @ts-ignore
   return nodes
 }
+
+/**
+ * @param {Array<{insert: string, attributes?: Object<string, any>}>} deltas
+ * @return {Array<{char: string, attributes: Object<string, any>}>}
+ */
+const deltasToChars = (deltas) => deltas.flatMap((delta) =>
+  Array.from(delta.insert).map((char) => ({ char, attributes: delta.attributes || {} }))
+)
 
 /**
  * @private
