@@ -96,7 +96,11 @@ export function yDocToProsemirrorJSON(ydoc: Y.Doc, xmlFragment?: string): Record
 export function yXmlFragmentToProsemirrorJSON(xmlFragment: Y.XmlFragment): Record<string, any>;
 export function setMeta(view: any, key: any, value: any): void;
 export function absolutePositionToRelativePosition(pos: number, type: Y.XmlFragment, mapping: ProsemirrorMapping): any;
+export function isMisresolvedTextPosition(y: Y.Doc, relPos: Y.RelativePosition, absPos: number | null): boolean;
 export function relativePositionToAbsolutePosition(y: Y.Doc, documentType: Y.XmlFragment, relPos: any, mapping: ProsemirrorMapping): null | number;
+export function findAbsolutePositionAfterStructuralChange(oldDoc: import('prosemirror-model').Node, newDoc: import('prosemirror-model').Node, absPos: number): number | null;
+export function isStructuralTransaction(tr: import('prosemirror-state').Transaction, oldDoc: import('prosemirror-model').Node): boolean;
+export function isMisresolvedAfterStructuralChange(oldDoc: import('prosemirror-model').Node, newDoc: import('prosemirror-model').Node, oldAbs: number, resolvedAbs: number | null): boolean;
 export function yXmlFragmentToProseMirrorFragment(yXmlFragment: Y.XmlFragment, schema: Schema): Fragment;
 export function yXmlFragmentToProseMirrorRootNode(yXmlFragment: Y.XmlFragment, schema: Schema): Node;
 export function initProseMirrorDoc(yXmlFragment: Y.XmlFragment, schema: Schema): {

@@ -6,8 +6,11 @@ export function isVisible(item: Y.Item, snapshot?: Y.Snapshot): boolean;
 export function ySyncPlugin(yXmlFragment: Y.XmlFragment, { colors, colorMapping, permanentUserData, onFirstRender, mapping }?: YSyncOpts): any;
 export function getRelativeSelection(pmbinding: ProsemirrorBinding, state: import('prosemirror-state').EditorState): {
     type: any;
+    depth: any;
     anchor: any;
     head: any;
+    absAnchor: number;
+    absHead: number;
 };
 /**
  * Binding for prosemirror.
@@ -44,8 +47,11 @@ export class ProsemirrorBinding {
      */
     beforeTransactionSelection: {
         type: any;
+        depth: any;
         anchor: any;
         head: any;
+        absAnchor: number;
+        absHead: number;
     };
     beforeAllTransactions: () => void;
     afterAllTransactions: () => void;
@@ -87,7 +93,7 @@ export class ProsemirrorBinding {
     initView(prosemirrorView: any): void;
     destroy(): void;
 }
-export function createNodeFromYElement(el: Y.XmlElement, schema: any, meta: BindingMetadata, snapshot?: Y.Snapshot, prevSnapshot?: Y.Snapshot, computeYChange?: (arg0: 'removed' | 'added', arg1: Y.ID) => any): PModel.Node | null;
+export function createNodeFromYElement(el: Y.XmlElement, schema: any, meta: BindingMetadata, snapshot?: Y.Snapshot, prevSnapshot?: Y.Snapshot, computeYChange?: (arg0: 'removed' | 'added', arg1: Y.ID) => any): PModel.Node | Array<PModel.Node> | null;
 export function yattr2markname(attrName: string): string;
 export function attributesToMarks(attrs: {
     [x: string]: any;
@@ -121,5 +127,10 @@ export type YSyncOpts = {
     onFirstRender?: Function;
 };
 export type NormalizedPNodeContent = Array<Array<PModel.Node> | PModel.Node>;
+export type MappedChildAnchor = {
+    yIndex: number;
+    pIndex: number;
+    yChild: Y.XmlElement | Y.XmlText | Y.XmlHook;
+};
 import * as Y from 'yjs';
 import * as PModel from 'prosemirror-model';

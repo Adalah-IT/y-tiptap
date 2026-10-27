@@ -4,6 +4,7 @@ import { Plugin } from "prosemirror-state"; // eslint-disable-line
 import { Awareness } from "y-protocols/awareness"; // eslint-disable-line
 import {
   absolutePositionToRelativePosition,
+  isStructuralTransaction,
   relativePositionToAbsolutePosition,
   setMeta
 } from '../lib.js'
@@ -19,7 +20,11 @@ import * as math from 'lib0/math'
  * @param {any} _user user data
  * @return {boolean}
  */
-export const defaultAwarenessStateFilter = (currentClientId, userClientId, _user) => currentClientId !== userClientId
+export const defaultAwarenessStateFilter = (
+  currentClientId,
+  userClientId,
+  _user
+) => currentClientId !== userClientId
 
 /**
  * Default generator for a cursor element
@@ -73,10 +78,14 @@ export const createDecorations = (
   createSelection
 ) => {
   const ystate = ySyncPluginKey.getState(state)
+  if (ystate == null || ystate.doc == null || ystate.binding == null) {
+    return DecorationSet.create(state.doc, [])
+  }
   const y = ystate.doc
   const decorations = []
   if (
-    ystate.snapshot != null || ystate.prevSnapshot != null ||
+    ystate.snapshot != null ||
+    ystate.prevSnapshot != null ||
     ystate.binding.mapping.size === 0
   ) {
     // do not render cursors while snapshot is active
@@ -87,7 +96,9 @@ export const createDecorations = (
       return
     }
 
-    if (aw.cursor != null) {
+    // `aw` can be null when a client disconnects, so we guard against it
+    // before reading `cursor` to avoid a TypeError.
+    if (aw && aw.cursor != null) {
       const user = aw.user || {}
       if (user.color == null) {
         user.color = '#ffa500'
@@ -170,11 +181,21 @@ export const yCursorPlugin = (
           selectionBuilder
         )
       },
-      apply (tr, prevState, _oldState, newState) {
+      apply (tr, prevState, oldState, newState) {
         const ystate = ySyncPluginKey.getState(newState)
         const yCursorState = tr.getMeta(yCursorPluginKey)
+        const isRemoteChange = ystate && ystate.isChangeOrigin
         if (
-          (ystate && ystate.isChangeOrigin) ||
+          tr.docChanged &&
+          !isRemoteChange &&
+          isStructuralTransaction(tr, oldState.doc)
+        ) {
+          // The ProseMirror document leads the Yjs mapping during local moves.
+          // Hide stale awareness until the collaborator publishes its new cursor.
+          return DecorationSet.empty
+        }
+        if (
+          isRemoteChange ||
           (yCursorState && yCursorState.awarenessUpdated)
         ) {
           return createDecorations(
@@ -185,7 +206,10 @@ export const yCursorPlugin = (
             selectionBuilder
           )
         }
-        return prevState.map(tr.mapping, tr.doc)
+        if (tr.docChanged) {
+          return prevState.map(tr.mapping, tr.doc)
+        }
+        return prevState
       }
     },
     props: {
@@ -200,12 +224,19 @@ export const yCursorPlugin = (
           setMeta(view, yCursorPluginKey, { awarenessUpdated: true })
         }
       }
-      const updateCursorInfo = () => {
-        const ystate = ySyncPluginKey.getState(view.state)
+      /**
+       * @param {import('prosemirror-view').EditorView} editorView
+       * @param {{ force?: boolean }} [opts]
+       */
+      const updateCursorInfo = (editorView, opts = {}) => {
+        const ystate = ySyncPluginKey.getState(editorView.state)
+        // `ystate` is undefined during sync-plugin init and Y.Doc transitions;
+        // reading from it here would throw and break cursor tracking for the view.
+        if (!ystate || !ystate.binding) return
         // @note We make implicit checks when checking for the cursor property
         const current = awareness.getLocalState() || {}
-        if (view.hasFocus()) {
-          const selection = getSelection(view.state)
+        if (editorView.hasFocus()) {
+          const selection = getSelection(editorView.state)
           /**
            * @type {Y.RelativePosition}
            */
@@ -223,6 +254,7 @@ export const yCursorPlugin = (
             ystate.binding.mapping
           )
           if (
+            opts.force ||
             current.cursor == null ||
             !Y.compareRelativePositions(
               Y.createRelativePositionFromJSON(current.cursor.anchor),
@@ -251,14 +283,23 @@ export const yCursorPlugin = (
           awareness.setLocalStateField(cursorStateField, null)
         }
       }
+      const onFocusChange = () => updateCursorInfo(view)
       awareness.on('change', awarenessListener)
-      view.dom.addEventListener('focusin', updateCursorInfo)
-      view.dom.addEventListener('focusout', updateCursorInfo)
+      view.dom.addEventListener('focusin', onFocusChange)
+      view.dom.addEventListener('focusout', onFocusChange)
       return {
-        update: updateCursorInfo,
+        update: (editorView, prevState) => {
+          const ystate = ySyncPluginKey.getState(editorView.state)
+          const forceAwarenessUpdate = !!(
+            ystate?.isChangeOrigin &&
+            prevState?.doc &&
+            !prevState.doc.eq(editorView.state.doc)
+          )
+          updateCursorInfo(editorView, { force: forceAwarenessUpdate })
+        },
         destroy: () => {
-          view.dom.removeEventListener('focusin', updateCursorInfo)
-          view.dom.removeEventListener('focusout', updateCursorInfo)
+          view.dom.removeEventListener('focusin', onFocusChange)
+          view.dom.removeEventListener('focusout', onFocusChange)
           awareness.off('change', awarenessListener)
           awareness.setLocalStateField(cursorStateField, null)
         }
